@@ -1,61 +1,79 @@
-// var io = require("socket.io-client");
-// var WebSocket = require("ws")
+// // var io = require("socket.io-client");
+// // var WebSocket = require("ws")
 var Emitter = require("wildemitter");
+var phoenix = require("phoenix");
+var uuidv4 = require("uuid/v4");
 
-function WS(config) {
-  this.session = new WebSocket(config.url);
-  var self = this
-  this.id = null
-  this.heartbeat = null
+// var Presence = require("phoenix");
+var Socket = phoenix.Socket;
+var Presence = phoenix.Presence;
 
-  this.session.onopen = function(event) {
-    self.emit('connect', arguments)
-    if (!self.heartbeat) {
-      self.heartbeat = setInterval(self.ping.bind(self), 30000)
-    }
-  }
-  this.session.onmessage = function(event) {
-    event = self.deserialize(event)
-    var name = event["event"]
-    var error = event["error"]
-    delete event["event"]
-    if (name === "connected") {
-      self.id = event.id
-    }
-    if (name === "join") {
-      if (!!error) {
-        delete event["error"]
-        self.emit(name, error, event)
-      } else {
-        self.emit(name, false, event)
-      }
-    } else {
-      self.emit(name, event)
-    }
-      
-  }
-}
+var WS = function(config) {
+  var self = this;
+  this.id = uuidv4();
+  this.socket = new Socket(config.url, { params: { user_id: this.id } });
+  this.socket.connect();
+  this.presences = [];
+  this.socket.onOpen(function() {
+    self.emit("connect");
+  });
+  this.channel = null;
+};
 Emitter.mixin(WS);
-WS.prototype.send = function(msg){
-  this.session.send(msg)
-}
 
-WS.prototype.ping = function() {
-  this.session.send(JSON.stringify({event: "ping"}))
-}
-
-WS.prototype.deserialize = function(msg) {
-  return JSON.parse(msg.data)
-}
-
-WS.prototype.disconnect = function(msg) {
-  this.session.close()
-  if (this.heartbeat) {
-    clearInterval(this.heartbeat)
+WS.prototype.push = function(args) {
+  switch (args.length) {
+    case 1:
+      this.channel.push(args[0]);
+      break;
+    case 2:
+      if (typeof args[1] === "function") {
+        this.channel.push(args[0]).receive("ok", args[1]);
+      } else {
+        this.channel.push(args[0], args[1]);
+      }
+      break;
+    case 3:
+      this.channel.push(args[0], args[1]).receive("ok", args[2]);
+      break;
+    default:
+      null;
   }
-  this.heartbeat = null
-  this.id = null
-}
+};
+WS.prototype.join = function(room_id, cb) {
+  var self = this;
+  this.channel = this.socket.channel("room:" + room_id, {});
+  this.channel.on("message", function(payload) {
+    self.emit("message", payload);
+  });
+  // this.channel.on("remove", function(room) {
+  //   self.emit("remove", room);
+  // });
+
+  // two events below are for presences update
+  this.channel.on("presence_state", function(state) {
+    console.log("got init state", state);
+    self.presences = Presence.syncState(self.presences, state);
+  });
+  this.channel.on("presence_diff", function(diff) {
+    console.log("got diff", diff);
+    self.presences = Presence.syncDiff(self.presences, diff);
+    var id;
+    for (id in diff.leaves) {
+      self.emit("remove", { id: id, type: null });
+    }
+  });
+  //
+  this.channel.on("turnservers", function(servers) {
+    self.emit("turnservers", servers);
+  });
+  this.channel.on("stunservers", function(servers) {
+    self.emit("stunservers", [servers]);
+  });
+  this.channel.join().receive("ok", function(resp) {
+    cb(false, resp);
+  });
+};
 
 function SocketIoConnection(config) {
   this.connection = new WS(config);
@@ -66,42 +84,25 @@ SocketIoConnection.prototype.on = function(ev, fn) {
 };
 
 SocketIoConnection.prototype.serialize = function() {
-  var payload = arguments[1]
+  var payload = arguments[1];
   if (typeof payload === "object") {
-    payload["event"] = arguments[0]
-    return payload
+    payload.event = arguments[0];
+    return payload;
   } else {
-    return { event: arguments[0], payload: payload }
+    return { event: arguments[0], payload: payload };
   }
-}
-
+};
 
 SocketIoConnection.prototype.emit = function() {
-  var msg = {};
-  switch (arguments.length) {
-    case 1:
-      msg = {event: arguments[0]}
-      break;
-    case 2:
-      if (typeof arguments[1] === "function") {
-        msg = this.serialize(arguments[0], "")
-        this.connection.on(arguments[0], arguments[1])
-      } else {
-        msg = this.serialize(arguments[0], arguments[1])
-      }
-      break;
-    case 3:
-      msg = this.serialize(arguments[0], arguments[1])
-      this.connection.on(arguments[0], arguments[2])
-    default:
-      break;
+  if (arguments[0] === "join") {
+    this.connection.join(arguments[1], arguments[2]);
+  } else {
+    this.connection.push(arguments);
   }
-  console.log(JSON.stringify(msg))
-  this.connection.send(JSON.stringify(msg))
 };
 
 SocketIoConnection.prototype.getSessionid = function() {
-  return this.connection.id;
+  this.connection.id;
 };
 
 SocketIoConnection.prototype.disconnect = function() {

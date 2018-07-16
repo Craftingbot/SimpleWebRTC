@@ -29,7 +29,7 @@
         <p id="subTitle"></p>
         <form id="createRoom">
             <input id="sessionInput"/>
-            <button type="submit">Create it!</button>
+            <button id="create">Create it!</button>
         </form>
         <div class="videoContainer">
             <video id="localVideo" style="height: 150px;" oncontextmenu="return false;"></video>
@@ -44,13 +44,15 @@
 
             // create our webrtc connection
             var webrtc = new SimpleWebRTC({
+                url: "ws://0.0.0.0:4000/socket",
+                debug: false,
+
                 // the id/element dom element that will hold "our" video
                 localVideoEl: 'localVideo',
                 // the id/element dom element that will hold remote videos
                 remoteVideosEl: '',
                 // immediately ask for camera access
                 autoRequestMedia: true,
-                debug: false,
                 detectSpeakingEvents: true
             });
 
@@ -144,6 +146,7 @@
             });
 
             setButton(true);
+
 
             button.click(function () {
                 if (webrtc.getLocalScreen()) {

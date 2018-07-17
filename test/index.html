@@ -44,8 +44,8 @@
 
             // create our webrtc connection
             var webrtc = new SimpleWebRTC({
-                url: "ws://0.0.0.0:4000/socket",
-                debug: false,
+              url: "wss://wss.oiwanzi.com/socket",
+                debug: true,
 
                 // the id/element dom element that will hold "our" video
                 localVideoEl: 'localVideo',
@@ -53,7 +53,7 @@
                 remoteVideosEl: '',
                 // immediately ask for camera access
                 autoRequestMedia: true,
-                detectSpeakingEvents: true
+                // detectSpeakingEvents: false
             });
 
             // when it's ready, join if we got a room from the URL

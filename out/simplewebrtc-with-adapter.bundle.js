@@ -14521,7 +14521,7 @@ SimpleWebRTC.prototype = Object.create(WildEmitter.prototype, {
 
 SimpleWebRTC.prototype.leaveRoom = function() {
   if (this.roomName) {
-    this.connection.emit("leave");
+    this.connection.leave();
     while (this.webrtc.peers.length) {
       this.webrtc.peers[0].end();
     }
@@ -14844,6 +14844,10 @@ SocketIoConnection.prototype.emit = function() {
   } else {
     this.connection.push(arguments);
   }
+};
+
+SocketIoConnection.prototype.leave = function() {
+  this.connection.channel.leave();
 };
 
 SocketIoConnection.prototype.getSessionid = function() {

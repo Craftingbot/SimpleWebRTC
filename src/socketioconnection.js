@@ -101,6 +101,10 @@ SocketIoConnection.prototype.emit = function() {
   }
 };
 
+SocketIoConnection.prototype.leave = function() {
+  this.connection.channel.leave();
+};
+
 SocketIoConnection.prototype.getSessionid = function() {
   this.connection.id;
 };

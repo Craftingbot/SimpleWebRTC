@@ -36,6 +36,9 @@ npm install && npm run test-page
 ### 2. 创建 SimpleWebRTC 的实例
 ```js
 var webrtc = new SimpleWebRTC({
+    // 指向 signal server 的地址
+    url: "ws://0.0.0.0:4000/socket",
+    //url: "wss://wss.oiwanzi.com/socket",  // 我们部署的signal server
     // id 指向html中的本地视频元素
     localVideoEl: 'localVideo',  
     // id 指向html中远程视频元素, 选填, 之后可以通过事件监听自定义行为

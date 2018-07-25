@@ -11091,10 +11091,10 @@ SimpleWebRTC.prototype.setVolumeForAll = function(volume) {
   });
 };
 
-SimpleWebRTC.prototype.joinRoom = function(name, cb) {
+SimpleWebRTC.prototype.joinRoom = function(name, user_name, cb) {
   var self = this;
   this.roomName = name;
-  this.connection.emit("join", name, function(err, roomDescription) {
+  this.connection.emit("join", name, user_name, function(err, roomDescription) {
     console.log("join CB", err, roomDescription);
     if (err) {
       self.emit("error", err);
@@ -11260,13 +11260,22 @@ var WS = function(config) {
   this.id = uuidv4();
   this.socket = new Socket(config.url, { params: { user_id: this.id } });
   this.socket.connect();
-  this.presences = [];
+  this.presences = {};
   this.socket.onOpen(function() {
     self.emit("connect");
   });
   this.channel = null;
 };
 Emitter.mixin(WS);
+
+WS.prototype.onJoin = function(key, currentPresence, newPresence) {
+  console.log("onJoin", key, currentPresence, newPresence);
+};
+
+WS.prototype.onLeave = function(key, currentPresence, leftPresence) {
+  console.log("onLeave", key, currentPresence, leftPresence);
+  this.emit("remove", { id: key, type: null });
+};
 
 WS.prototype.push = function(args) {
   switch (args.length) {
@@ -11287,9 +11296,11 @@ WS.prototype.push = function(args) {
       null;
   }
 };
-WS.prototype.join = function(room_id, cb) {
+WS.prototype.join = function(room_id, user_name, cb) {
   var self = this;
-  this.channel = this.socket.channel("room:" + room_id, {});
+  this.channel = this.socket.channel("room:" + room_id, {
+    user_name: user_name
+  });
   this.channel.on("message", function(payload) {
     self.emit("message", payload);
   });
@@ -11303,12 +11314,14 @@ WS.prototype.join = function(room_id, cb) {
     self.presences = Presence.syncState(self.presences, state);
   });
   this.channel.on("presence_diff", function(diff) {
-    console.log("got diff", diff);
-    self.presences = Presence.syncDiff(self.presences, diff);
-    var id;
-    for (id in diff.leaves) {
-      self.emit("remove", { id: id, type: null });
-    }
+    console.log("diff", diff);
+    console.log("current", self.presences);
+    self.presences = Presence.syncDiff(
+      self.presences,
+      diff,
+      self.onJoin.bind(self),
+      self.onLeave.bind(self)
+    );
   });
   //
   this.channel.on("turnservers", function(servers) {
@@ -11342,7 +11355,7 @@ SocketIoConnection.prototype.serialize = function() {
 
 SocketIoConnection.prototype.emit = function() {
   if (arguments[0] === "join") {
-    this.connection.join(arguments[1], arguments[2]);
+    this.connection.join(arguments[1], arguments[2], arguments[3]);
   } else {
     this.connection.push(arguments);
   }

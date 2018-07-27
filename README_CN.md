@@ -95,6 +95,34 @@ webrtc.on('videoRemoved', function (video, peer) {
 1. 关闭视频: `webrtc.pauseVideo()`
 
 
+### 7. 用户间通信 (datachannel)
+向所有已连接的用户(peer) 发送消息
+```js
+webrtc.sendDirectlyToAll(channelLabel, messageType, payload)
+```
+- `string channelLabel` - datachannel 频道的名字
+- `string messageType` - 发送消息的类型名称
+- `object payload` - 发送消息的内容
+
+向特定的用户(peer) 发送消息
+```js
+peer.send(message, payload);
+```
+
+监听发送过来的消息
+```js
+this.webrtc.webrtc.on("channelMessage", (peer, label, data)=>{
+  // data 的结构为 {
+      type: type,  # messageType
+      payload: payload, #payload
+  // }
+  if (data.type == "event") {
+    let payload = data.payload
+    // your logics goes here
+  }
+});
+```
+
 ### Available options
 
 

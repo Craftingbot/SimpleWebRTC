@@ -121,6 +121,18 @@ this.webrtc.webrtc.on("channelMessage", (peer, label, data)=>{
     // your logics goes here
   }
 });
+
+### 8. 发送quickMessage, 该方法为一次性方法， 发送完毕会断开连接
+```js
+this.webrtc.sendQuickMessage(room_id, user_name, message)
+// 对应接收端为
+this.webrtc.on(“quick_message”, function(payload) {
+
+})
+```
+
+
+
 ```
 
 ### Available options

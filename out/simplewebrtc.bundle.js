@@ -10863,10 +10863,26 @@ function SimpleWebRTC(opts) {
     }
   });
 
+  connection.on("updateRoomInfo", function(state) {
+    self.emit("updateRoomInfo", state);
+  });
+
+  connection.on("joined", function(newState) {
+    self.emit("joined", newState);
+  });
+
+  connection.on("left", function(newState) {
+    self.emit("left", newState);
+  });
+
   connection.on("remove", function(room) {
     if (room.id !== self.connection.getSessionid()) {
       self.webrtc.removePeers(room.id, room.type);
     }
+  });
+
+  connection.on("quick_message", function(payload) {
+    self.emit("quick_message", payload);
   });
 
   // instantiate our main WebRTC helper
@@ -11091,6 +11107,29 @@ SimpleWebRTC.prototype.setVolumeForAll = function(volume) {
   });
 };
 
+// just send a message in a room
+SimpleWebRTC.prototype.sendQuickMessage = function(
+  room_name,
+  user_name,
+  message
+) {
+  var self = this;
+  var connection = new SocketIoConnection(this.config);
+
+  connection.emit("join", room_name, "anonymous_" + user_name, function(
+    err,
+    roomDescription
+  ) {
+    if (err) {
+      self.emit("error", err);
+    } else {
+      connection.emit("quick_message", { message: message }, function() {
+        connection.disconnect();
+      });
+    }
+  });
+};
+
 SimpleWebRTC.prototype.joinRoom = function(name, user_name, cb) {
   var self = this;
   this.roomName = name;
@@ -11220,9 +11259,17 @@ SimpleWebRTC.prototype.testReadiness = function() {
   var self = this;
   if (this.sessionReady) {
     if (!this.config.media.video && !this.config.media.audio) {
-      self.emit("readyToCall", self.connection.getSessionid());
+      self.emit(
+        "readyToCall",
+        self.connection.getSessionid(),
+        self.webrtc.localStreams[0]
+      );
     } else if (this.webrtc.localStreams.length > 0) {
-      self.emit("readyToCall", self.connection.getSessionid());
+      self.emit(
+        "readyToCall",
+        self.connection.getSessionid(),
+        self.webrtc.localStreams[0]
+      );
     }
   }
 };
@@ -11269,12 +11316,29 @@ var WS = function(config) {
 Emitter.mixin(WS);
 
 WS.prototype.onJoin = function(key, currentPresence, newPresence) {
-  console.log("onJoin", key, currentPresence, newPresence);
+  if (!currentPresence) {
+    console.log("user enter for the first time", newPresence);
+    this.emit("joined", key, newPresence);
+  } else {
+    console.log("user updating additional info", newPresence);
+  }
 };
 
 WS.prototype.onLeave = function(key, currentPresence, leftPresence) {
-  console.log("onLeave", key, currentPresence, leftPresence);
-  this.emit("remove", { id: key, type: null });
+  if (currentPresence.metas.length === 0) {
+    console.log("user has left from all devices", leftPresence);
+    this.emit("left", key, leftPresence);
+    this.emit("remove", { id: key, type: null });
+  } else {
+    console.log("user left from a device", leftPresence);
+  }
+};
+
+WS.prototype.listBy = function(id, state) {
+  if (!state.metas) return;
+  var first = state.metas[0];
+  first.id = id;
+  return first;
 };
 
 WS.prototype.push = function(args) {
@@ -11304,9 +11368,10 @@ WS.prototype.join = function(room_id, user_name, cb) {
   this.channel.on("message", function(payload) {
     self.emit("message", payload);
   });
-  // this.channel.on("remove", function(room) {
-  //   self.emit("remove", room);
-  // });
+
+  this.channel.on("quick_message", function(payload) {
+    self.emit("quick_message", payload);
+  });
 
   // two events below are for presences update
   this.channel.on("presence_state", function(state) {
@@ -11314,14 +11379,13 @@ WS.prototype.join = function(room_id, user_name, cb) {
     self.presences = Presence.syncState(self.presences, state);
   });
   this.channel.on("presence_diff", function(diff) {
-    console.log("diff", diff);
-    console.log("current", self.presences);
     self.presences = Presence.syncDiff(
       self.presences,
       diff,
       self.onJoin.bind(self),
       self.onLeave.bind(self)
     );
+    self.emit("updateRoomInfo", Presence.list(self.presences, self.listBy));
   });
   //
   this.channel.on("turnservers", function(servers) {
@@ -11366,169 +11430,171 @@ SocketIoConnection.prototype.leave = function() {
 };
 
 SocketIoConnection.prototype.getSessionid = function() {
-  this.connection.id;
+  return this.connection.id;
 };
 
 SocketIoConnection.prototype.disconnect = function() {
-  return this.connection.disconnect();
+  return this.connection.socket.disconnect();
 };
 
 module.exports = SocketIoConnection;
 
 },{"phoenix":9,"uuid/v4":22,"wildemitter":34}],38:[function(require,module,exports){
-var util = require('util');
-var webrtcSupport = require('webrtcsupport');
-var mockconsole = require('mockconsole');
-var localMedia = require('localmedia');
-var Peer = require('./peer');
+var util = require("util");
+var webrtcSupport = require("webrtcsupport");
+var mockconsole = require("mockconsole");
+var localMedia = require("localmedia");
+var Peer = require("./peer");
 
 function WebRTC(opts) {
-    var self = this;
-    var options = opts || {};
-    var config = this.config = {
-            debug: false,
-            // makes the entire PC config overridable
-            peerConnectionConfig: {
-                iceServers: [{'urls': 'stun:stun.l.google.com:19302'}]
-            },
-            peerConnectionConstraints: {
-                optional: []
-            },
-            receiveMedia: {
-                offerToReceiveAudio: 1,
-                offerToReceiveVideo: 1
-            },
-            enableDataChannels: true
-        };
-    var item;
+  var self = this;
+  var options = opts || {};
+  var config = (this.config = {
+    debug: false,
+    // makes the entire PC config overridable
+    peerConnectionConfig: {
+      iceServers: []
+    },
+    peerConnectionConstraints: {
+      optional: []
+    },
+    receiveMedia: {
+      offerToReceiveAudio: 1,
+      offerToReceiveVideo: 1
+    },
+    enableDataChannels: true
+  });
+  var item;
 
-    // We also allow a 'logger' option. It can be any object that implements
-    // log, warn, and error methods.
-    // We log nothing by default, following "the rule of silence":
-    // http://www.linfo.org/rule_of_silence.html
-    this.logger = function () {
-        // we assume that if you're in debug mode and you didn't
-        // pass in a logger, you actually want to log as much as
-        // possible.
-        if (opts.debug) {
-            return opts.logger || console;
-        } else {
-        // or we'll use your logger which should have its own logic
-        // for output. Or we'll return the no-op.
-            return opts.logger || mockconsole;
-        }
-    }();
-
-    // set options
-    for (item in options) {
-        if (options.hasOwnProperty(item)) {
-            this.config[item] = options[item];
-        }
+  // We also allow a 'logger' option. It can be any object that implements
+  // log, warn, and error methods.
+  // We log nothing by default, following "the rule of silence":
+  // http://www.linfo.org/rule_of_silence.html
+  this.logger = (function() {
+    // we assume that if you're in debug mode and you didn't
+    // pass in a logger, you actually want to log as much as
+    // possible.
+    if (opts.debug) {
+      return opts.logger || console;
+    } else {
+      // or we'll use your logger which should have its own logic
+      // for output. Or we'll return the no-op.
+      return opts.logger || mockconsole;
     }
+  })();
 
-    // check for support
-    if (!webrtcSupport.support) {
-        this.logger.error('Your browser doesn\'t seem to support WebRTC');
+  // set options
+  for (item in options) {
+    if (options.hasOwnProperty(item)) {
+      this.config[item] = options[item];
     }
+  }
 
-    // where we'll store our peer connections
-    this.peers = [];
+  // check for support
+  if (!webrtcSupport.support) {
+    this.logger.error("Your browser doesn't seem to support WebRTC");
+  }
 
-    // call localMedia constructor
-    localMedia.call(this, this.config);
+  // where we'll store our peer connections
+  this.peers = [];
 
-    this.on('speaking', function () {
-        if (!self.hardMuted) {
-            // FIXME: should use sendDirectlyToAll, but currently has different semantics wrt payload
-            self.peers.forEach(function (peer) {
-                if (peer.enableDataChannels) {
-                    var dc = peer.getDataChannel('hark');
-                    if (dc.readyState != 'open') return;
-                    dc.send(JSON.stringify({type: 'speaking'}));
-                }
-            });
+  // call localMedia constructor
+  localMedia.call(this, this.config);
+
+  this.on("speaking", function() {
+    if (!self.hardMuted) {
+      // FIXME: should use sendDirectlyToAll, but currently has different semantics wrt payload
+      self.peers.forEach(function(peer) {
+        if (peer.enableDataChannels) {
+          var dc = peer.getDataChannel("hark");
+          if (dc.readyState != "open") return;
+          dc.send(JSON.stringify({ type: "speaking" }));
         }
-    });
-    this.on('stoppedSpeaking', function () {
-        if (!self.hardMuted) {
-            // FIXME: should use sendDirectlyToAll, but currently has different semantics wrt payload
-            self.peers.forEach(function (peer) {
-                if (peer.enableDataChannels) {
-                    var dc = peer.getDataChannel('hark');
-                    if (dc.readyState != 'open') return;
-                    dc.send(JSON.stringify({type: 'stoppedSpeaking'}));
-                }
-            });
-        }
-    });
-    this.on('volumeChange', function (volume, treshold) {
-        if (!self.hardMuted) {
-            // FIXME: should use sendDirectlyToAll, but currently has different semantics wrt payload
-            self.peers.forEach(function (peer) {
-                if (peer.enableDataChannels) {
-                    var dc = peer.getDataChannel('hark');
-                    if (dc.readyState != 'open') return;
-                    dc.send(JSON.stringify({type: 'volume', volume: volume }));
-                }
-            });
-        }
-    });
-
-    // log events in debug mode
-    if (this.config.debug) {
-        this.on('*', function (event, val1, val2) {
-            var logger;
-            // if you didn't pass in a logger and you explicitly turning on debug
-            // we're just going to assume you're wanting log output with console
-            if (self.config.logger === mockconsole) {
-                logger = console;
-            } else {
-                logger = self.logger;
-            }
-            logger.log('event:', event, val1, val2);
-        });
+      });
     }
+  });
+  this.on("stoppedSpeaking", function() {
+    if (!self.hardMuted) {
+      // FIXME: should use sendDirectlyToAll, but currently has different semantics wrt payload
+      self.peers.forEach(function(peer) {
+        if (peer.enableDataChannels) {
+          var dc = peer.getDataChannel("hark");
+          if (dc.readyState != "open") return;
+          dc.send(JSON.stringify({ type: "stoppedSpeaking" }));
+        }
+      });
+    }
+  });
+  this.on("volumeChange", function(volume, treshold) {
+    if (!self.hardMuted) {
+      // FIXME: should use sendDirectlyToAll, but currently has different semantics wrt payload
+      self.peers.forEach(function(peer) {
+        if (peer.enableDataChannels) {
+          var dc = peer.getDataChannel("hark");
+          if (dc.readyState != "open") return;
+          dc.send(JSON.stringify({ type: "volume", volume: volume }));
+        }
+      });
+    }
+  });
+
+  // log events in debug mode
+  if (this.config.debug) {
+    this.on("*", function(event, val1, val2) {
+      var logger;
+      // if you didn't pass in a logger and you explicitly turning on debug
+      // we're just going to assume you're wanting log output with console
+      if (self.config.logger === mockconsole) {
+        logger = console;
+      } else {
+        logger = self.logger;
+      }
+      logger.log("event:", event, val1, val2);
+    });
+  }
 }
 
 util.inherits(WebRTC, localMedia);
 
-WebRTC.prototype.createPeer = function (opts) {
-    var peer;
-    opts.parent = this;
-    peer = new Peer(opts);
-    this.peers.push(peer);
-    return peer;
+WebRTC.prototype.createPeer = function(opts) {
+  var peer;
+  opts.parent = this;
+  peer = new Peer(opts);
+  this.peers.push(peer);
+  return peer;
 };
 
 // removes peers
-WebRTC.prototype.removePeers = function (id, type) {
-    this.getPeers(id, type).forEach(function (peer) {
-        peer.end();
-    });
+WebRTC.prototype.removePeers = function(id, type) {
+  this.getPeers(id, type).forEach(function(peer) {
+    peer.end();
+  });
 };
 
 // fetches all Peer objects by session id and/or type
-WebRTC.prototype.getPeers = function (sessionId, type) {
-    return this.peers.filter(function (peer) {
-        return (!sessionId || peer.id === sessionId) && (!type || peer.type === type);
-    });
+WebRTC.prototype.getPeers = function(sessionId, type) {
+  return this.peers.filter(function(peer) {
+    return (
+      (!sessionId || peer.id === sessionId) && (!type || peer.type === type)
+    );
+  });
 };
 
 // sends message to all
-WebRTC.prototype.sendToAll = function (message, payload) {
-    this.peers.forEach(function (peer) {
-        peer.send(message, payload);
-    });
+WebRTC.prototype.sendToAll = function(message, payload) {
+  this.peers.forEach(function(peer) {
+    peer.send(message, payload);
+  });
 };
 
 // sends message to all using a datachannel
 // only sends to anyone who has an open datachannel
-WebRTC.prototype.sendDirectlyToAll = function (channel, message, payload) {
-    this.peers.forEach(function (peer) {
-        if (peer.enableDataChannels) {
-            peer.sendDirectly(channel, message, payload);
-        }
-    });
+WebRTC.prototype.sendDirectlyToAll = function(channel, message, payload) {
+  this.peers.forEach(function(peer) {
+    if (peer.enableDataChannels) {
+      peer.sendDirectly(channel, message, payload);
+    }
+  });
 };
 
 module.exports = WebRTC;

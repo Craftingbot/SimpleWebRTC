@@ -22,12 +22,29 @@ var WS = function(config) {
 Emitter.mixin(WS);
 
 WS.prototype.onJoin = function(key, currentPresence, newPresence) {
-  console.log("onJoin", key, currentPresence, newPresence);
+  if (!currentPresence) {
+    console.log("user enter for the first time", newPresence);
+    this.emit("joined", key, newPresence);
+  } else {
+    console.log("user updating additional info", newPresence);
+  }
 };
 
 WS.prototype.onLeave = function(key, currentPresence, leftPresence) {
-  console.log("onLeave", key, currentPresence, leftPresence);
-  this.emit("remove", { id: key, type: null });
+  if (currentPresence.metas.length === 0) {
+    console.log("user has left from all devices", leftPresence);
+    this.emit("left", key, leftPresence);
+    this.emit("remove", { id: key, type: null });
+  } else {
+    console.log("user left from a device", leftPresence);
+  }
+};
+
+WS.prototype.listBy = function(id, state) {
+  if (!state.metas) return;
+  var first = state.metas[0];
+  first.id = id;
+  return first;
 };
 
 WS.prototype.push = function(args) {
@@ -57,9 +74,6 @@ WS.prototype.join = function(room_id, user_name, cb) {
   this.channel.on("message", function(payload) {
     self.emit("message", payload);
   });
-  // this.channel.on("remove", function(room) {
-  //   self.emit("remove", room);
-  // });
 
   // two events below are for presences update
   this.channel.on("presence_state", function(state) {
@@ -67,14 +81,13 @@ WS.prototype.join = function(room_id, user_name, cb) {
     self.presences = Presence.syncState(self.presences, state);
   });
   this.channel.on("presence_diff", function(diff) {
-    console.log("diff", diff);
-    console.log("current", self.presences);
     self.presences = Presence.syncDiff(
       self.presences,
       diff,
       self.onJoin.bind(self),
       self.onLeave.bind(self)
     );
+    self.emit("updateRoomInfo", Presence.list(self.presences, self.listBy));
   });
   //
   this.channel.on("turnservers", function(servers) {
@@ -119,7 +132,7 @@ SocketIoConnection.prototype.leave = function() {
 };
 
 SocketIoConnection.prototype.getSessionid = function() {
-  this.connection.id;
+  return this.connection.id;
 };
 
 SocketIoConnection.prototype.disconnect = function() {

@@ -121,6 +121,18 @@ function SimpleWebRTC(opts) {
     }
   });
 
+  connection.on("updateRoomInfo", function(state) {
+    self.emit("updateRoomInfo", state);
+  });
+
+  connection.on("joined", function(newState) {
+    self.emit("joined", newState);
+  });
+
+  connection.on("left", function(newState) {
+    self.emit("left", newState);
+  });
+
   connection.on("remove", function(room) {
     if (room.id !== self.connection.getSessionid()) {
       self.webrtc.removePeers(room.id, room.type);
@@ -349,6 +361,10 @@ SimpleWebRTC.prototype.setVolumeForAll = function(volume) {
   });
 };
 
+// just send a message in a room
+// SimpleWebRTC.prototype.justJoinRoom = function(name, user_name, message) {
+// }
+
 SimpleWebRTC.prototype.joinRoom = function(name, user_name, cb) {
   var self = this;
   this.roomName = name;
@@ -478,9 +494,17 @@ SimpleWebRTC.prototype.testReadiness = function() {
   var self = this;
   if (this.sessionReady) {
     if (!this.config.media.video && !this.config.media.audio) {
-      self.emit("readyToCall", self.connection.getSessionid());
+      self.emit(
+        "readyToCall",
+        self.connection.getSessionid(),
+        self.webrtc.localStreams[0]
+      );
     } else if (this.webrtc.localStreams.length > 0) {
-      self.emit("readyToCall", self.connection.getSessionid());
+      self.emit(
+        "readyToCall",
+        self.connection.getSessionid(),
+        self.webrtc.localStreams[0]
+      );
     }
   }
 };

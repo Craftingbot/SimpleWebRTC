@@ -374,7 +374,10 @@ SimpleWebRTC.prototype.sendQuickMessage = function(
   var self = this;
   var connection = new SocketIoConnection(this.config);
 
-  connection.emit("join", room_name, user_name, function(err, roomDescription) {
+  connection.emit("join", room_name, "anonymous_" + user_name, function(
+    err,
+    roomDescription
+  ) {
     if (err) {
       self.emit("error", err);
     } else {

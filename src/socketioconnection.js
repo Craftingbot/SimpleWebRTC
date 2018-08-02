@@ -75,6 +75,10 @@ WS.prototype.join = function(room_id, user_name, cb) {
     self.emit("message", payload);
   });
 
+  this.channel.on("quick_message", function(payload) {
+    self.emit("quick_message", payload);
+  });
+
   // two events below are for presences update
   this.channel.on("presence_state", function(state) {
     console.log("got init state", state);
@@ -136,7 +140,7 @@ SocketIoConnection.prototype.getSessionid = function() {
 };
 
 SocketIoConnection.prototype.disconnect = function() {
-  return this.connection.disconnect();
+  return this.connection.socket.disconnect();
 };
 
 module.exports = SocketIoConnection;

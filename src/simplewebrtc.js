@@ -139,6 +139,10 @@ function SimpleWebRTC(opts) {
     }
   });
 
+  connection.on("quick_message", function(payload) {
+    self.emit("quick_message", payload);
+  });
+
   // instantiate our main WebRTC helper
   // using same logger from logic here
   opts.logger = this.logger;
@@ -362,8 +366,24 @@ SimpleWebRTC.prototype.setVolumeForAll = function(volume) {
 };
 
 // just send a message in a room
-// SimpleWebRTC.prototype.justJoinRoom = function(name, user_name, message) {
-// }
+SimpleWebRTC.prototype.sendQuickMessage = function(
+  room_name,
+  user_name,
+  message
+) {
+  var self = this;
+  var connection = new SocketIoConnection(this.config);
+
+  connection.emit("join", room_name, user_name, function(err, roomDescription) {
+    if (err) {
+      self.emit("error", err);
+    } else {
+      connection.emit("quick_message", { message: message }, function() {
+        connection.disconnect();
+      });
+    }
+  });
+};
 
 SimpleWebRTC.prototype.joinRoom = function(name, user_name, cb) {
   var self = this;
